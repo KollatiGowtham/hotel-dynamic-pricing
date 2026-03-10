@@ -1,55 +1,36 @@
-import json
-import boto3
+version: 0.2
 
-s3 = boto3.client("s3")
-BUCKET = "hotel-pricing-datalake"
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - echo "Installing dependencies..."
+      - pip install boto3 -q
 
-def lambda_handler(event, context):
-    params = event.get("queryStringParameters") or {}
-    hotel_id = params.get("hotel_id", "H01")
-    room_type = params.get("room_type", "standard")
-    advance_days = params.get("advance_days", "7")
+  pre_build:
+    commands:
+      - echo "Validating Lambda files..."
+      - python -c "import ast; ast.parse(open('lambda/pricing_engine.py').read()); print('pricing_engine.py OK')"
+      - python -c "import ast; ast.parse(open('lambda/pricing_api.py').read()); print('pricing_api.py OK')"
 
-    try:
-        obj = s3.get_object(Bucket=BUCKET, Key="pricing-output/current/prices.json")
-        pricing = json.loads(obj["Body"].read())
+  build:
+    commands:
+      - echo "Packaging Lambda functions..."
+      - zip -j pricing-engine.zip lambda/pricing_engine.py
+      - zip -j pricing-api.zip lambda/pricing_api.py
 
-        advance_key = f"{advance_days}_days_advance"
-        price_data = pricing["hotels"][hotel_id][room_type][advance_key]
+  post_build:
+    commands:
+      - echo "Deploying to Lambda..."
+      - aws lambda update-function-code --function-name hotel-pricing-engine --zip-file fileb://pricing-engine.zip
+      - aws lambda update-function-code --function-name hotel-pricing-api --zip-file fileb://pricing-api.zip
+      - echo "Triggering pricing run..."
+      - aws lambda invoke --function-name hotel-pricing-engine /tmp/output.json
+      - cat /tmp/output.json
+      - echo "Deployment complete!"
 
-        return {
-            "statusCode": 200,
-            "headers": {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
-            },
-            "body": json.dumps({
-                "hotel_id": hotel_id,
-                "room_type": room_type,
-                "advance_days": advance_days,
-                "optimal_price": price_data["optimal_price"],
-                "base_price": price_data["base_price"],
-                "season": price_data["season"],
-                "occupancy_rate": price_data["occupancy_rate"],
-                "is_holiday": price_data["holiday_flag"],
-                "competitor_avg": price_data["competitor_avg"],
-                "recommendation": price_data["recommendation"],
-                "generated_at": pricing["generated_at"]
-            })
-        }
-
-    except KeyError:
-        return {
-            "statusCode": 404,
-            "body": json.dumps({
-                "error": f"No price found for {hotel_id}/{room_type}/{advance_days} days",
-                "valid_hotel_ids": ["H01", "H02"],
-                "valid_room_types": ["standard", "deluxe", "suite"],
-                "valid_advance_days": ["1", "7", "14", "30", "60", "90"]
-            })
-        }
-    except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+artifacts:
+  files:
+    - pricing-engine.zip
+    - pricing-api.zip
