@@ -118,7 +118,9 @@ def calculate_optimal_price(hotel_id, room_type, check_in_date,
     advance_mult = calculate_advance_multiplier(advance_days)
     occupancy_mult = calculate_occupancy_multiplier(occupancy_rate)
     holiday_mult = 1.25 if holiday_flag else 1.0
-    competitor_mult = calculate_competitor_multiplier(base_price * season_mult, competitor_avg)
+    competitor_mult = calculate_competitor_multiplier(
+        base_price * season_mult, competitor_avg
+    )
 
     optimal_price = (
         base_price * season_mult * dow_mult *
@@ -150,13 +152,15 @@ def calculate_optimal_price(hotel_id, room_type, check_in_date,
 def save_pricing_output(results, run_timestamp):
     current_key = "pricing-output/current/prices.json"
     s3.put_object(
-        Bucket=BUCKET, Key=current_key,
+        Bucket=BUCKET,
+        Key=current_key,
         Body=json.dumps(results, indent=2),
         ContentType="application/json"
     )
     history_key = f"pricing-output/history/prices_{run_timestamp}.json"
     s3.put_object(
-        Bucket=BUCKET, Key=history_key,
+        Bucket=BUCKET,
+        Key=history_key,
         Body=json.dumps(results, indent=2),
         ContentType="application/json"
     )
@@ -173,7 +177,6 @@ def lambda_handler(event, context):
     room_types = ["standard", "deluxe", "suite"]
     advance_windows = [1, 7, 14, 30, 60, 90]
     today = date.today()
-
     results = {"generated_at": run_timestamp, "hotels": {}}
 
     for hotel_id in hotels:
@@ -187,6 +190,10 @@ def lambda_handler(event, context):
                     advance_days, occupancy_data, competitor_data
                 )
                 results["hotels"][hotel_id][room_type][f"{advance_days}_days_advance"] = pricing
+                logger.info(
+                    f"{hotel_id} | {room_type} | +{advance_days}d "
+                    f"-> {pricing['optimal_price']} ({pricing['recommendation']})"
+                )
 
     save_pricing_output(results, run_timestamp)
 
